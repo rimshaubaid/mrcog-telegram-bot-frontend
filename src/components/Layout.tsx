@@ -5,7 +5,8 @@ import {
   PlusCircle, 
   ListTodo, 
   Bot,
-  Settings
+  Settings,
+  Calendar
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -19,6 +20,7 @@ const Layout = ({ children }: LayoutProps) => {
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'Add Question', href: '/add-question', icon: PlusCircle },
     { name: 'Manage Questions', href: '/manage-questions', icon: ListTodo },
+    { name: 'Question Scheduler', href: '/scheduler', icon: Calendar },
   ];
 
   return (

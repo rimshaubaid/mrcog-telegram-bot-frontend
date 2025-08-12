@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react';
 import { 
   Search, 
-  Filter, 
   Edit, 
   Trash2, 
   Eye,
   Plus,
   Download,
-  MoreHorizontal,
   X
 } from 'lucide-react';
 
@@ -119,18 +117,7 @@ const ManageQuestions = () => {
     return matchesSearch && matchesTopic;
   });
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this question?')) {
-      try {
-        // Replace with actual API call
-        // await axios.delete(`/api/questions/${id}`);
-        
-        setQuestions(questions.filter(q => q.id !== id));
-      } catch (error) {
-        console.error('Error deleting question:', error);
-      }
-    }
-  };
+
 
   const handleToggleActive = async (id: string) => {
     try {

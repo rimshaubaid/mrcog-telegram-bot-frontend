@@ -89,6 +89,62 @@ export const botAPI = {
     api.put('/bot/schedule', { schedule }),
 };
 
+// Scheduling API
+export const schedulingAPI = {
+  // Get all question buckets
+  getBuckets: () => 
+    api.get('/scheduling/buckets'),
+  
+  // Get bucket by ID
+  getBucket: (id: string) => 
+    api.get(`/scheduling/buckets/${id}`),
+  
+  // Create new question bucket
+  createBucket: (data: {
+    name: string;
+    topic: string;
+    questions: string[];
+    maxQuestions: number;
+    dayOfWeek: string;
+  }) => api.post('/scheduling/buckets', data),
+  
+  // Update existing bucket
+  updateBucket: (id: string, data: {
+    name?: string;
+    topic?: string;
+    questions?: string[];
+    maxQuestions?: number;
+    dayOfWeek?: string;
+  }) => api.put(`/scheduling/buckets/${id}`, data),
+  
+  // Delete bucket
+  deleteBucket: (id: string) => 
+    api.delete(`/scheduling/buckets/${id}`),
+  
+  // Toggle bucket active status
+  toggleBucketActive: (id: string, isActive: boolean) => 
+    api.patch(`/scheduling/buckets/${id}/toggle`, { isActive }),
+  
+  // Get schedule for specific day
+  getDaySchedule: (dayOfWeek: string) => 
+    api.get(`/scheduling/days/${dayOfWeek}`),
+  
+  // Get weekly schedule overview
+  getWeeklySchedule: () => 
+    api.get('/scheduling/weekly'),
+  
+  // Get topic-wise schedule summary
+  getTopicSchedule: (topic: string) => 
+    api.get(`/scheduling/topics/${topic}`),
+  
+  // Bulk update schedules
+  updateSchedules: (schedules: Array<{
+    id: string;
+    dayOfWeek: string;
+    isActive: boolean;
+  }>) => api.put('/scheduling/bulk-update', { schedules }),
+};
+
 // Auth API (for future use)
 export const authAPI = {
   login: (credentials: { email: string; password: string }) => 

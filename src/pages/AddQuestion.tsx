@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Save, Plus, X, AlertCircle } from 'lucide-react';
+import { Save, X, AlertCircle } from 'lucide-react';
 
 interface QuestionForm {
   question: string;
