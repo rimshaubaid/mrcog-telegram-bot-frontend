@@ -6,8 +6,11 @@ import {
   ListTodo, 
   Bot,
   Settings,
-  Calendar
+  Calendar,
+  LogOut,
+  User
 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
 
 interface LayoutProps {
   children: ReactNode;
@@ -15,6 +18,7 @@ interface LayoutProps {
 
 const Layout = ({ children }: LayoutProps) => {
   const location = useLocation();
+  const { user, logout } = useAuth();
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -22,6 +26,10 @@ const Layout = ({ children }: LayoutProps) => {
     { name: 'Manage Questions', href: '/manage-questions', icon: ListTodo },
     { name: 'Question Scheduler', href: '/scheduler', icon: Calendar },
   ];
+
+  const handleLogout = () => {
+    logout();
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -56,11 +64,23 @@ const Layout = ({ children }: LayoutProps) => {
           </div>
         </nav>
 
-        {/* Bottom section */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200">
-          <div className="flex items-center space-x-2 text-sm text-gray-500">
-            <Settings className="h-4 w-4" />
-            <span>Admin Panel</span>
+        {/* Bottom section with user info and logout */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 bg-gray-50">
+          <div className="space-y-3">
+            {/* User info */}
+            <div className="flex items-center space-x-2 text-sm text-gray-700">
+              <User className="h-4 w-4" />
+              <span className="truncate">{user?.email || 'Loading...'}</span>
+            </div>
+            
+            {/* Logout button */}
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 rounded-md transition-colors"
+            >
+              <LogOut className="mr-3 h-4 w-4" />
+              Sign Out
+            </button>
           </div>
         </div>
       </div>

@@ -8,6 +8,7 @@ import {
   Download,
   X
 } from 'lucide-react';
+import { questionsAPI } from '../services/api';
 
 interface Question {
   id: string;
@@ -48,64 +49,40 @@ const ManageQuestions = () => {
 
   const fetchQuestions = async () => {
     try {
-      // Replace with actual API call
-      // const response = await axios.get('/api/questions');
+      setLoading(true);
       
-      // Mock data
-      const mockQuestions: Question[] = [
-        {
-          id: '1',
-          question: 'A 32-year-old primigravida presents at 28 weeks gestation with severe preeclampsia. Which of the following is the most appropriate immediate management?',
-          options: [
-            'Immediate delivery by cesarean section',
-            'Conservative management with bed rest',
-            'Antihypertensive therapy only',
-            'Expectant management until 37 weeks'
-          ],
-          correctAnswer: 'A',
-          explanation: 'Severe preeclampsia at 28 weeks requires immediate delivery to prevent maternal and fetal complications.',
-          topic: 'Obstetrics',
-          createdAt: '2024-01-15',
-          isActive: true
-        },
-        {
-          id: '2',
-          question: 'Which of the following is the most common cause of postmenopausal bleeding?',
-          options: [
-            'Endometrial cancer',
-            'Endometrial atrophy',
-            'Cervical cancer',
-            'Uterine fibroids'
-          ],
-          correctAnswer: 'B',
-          explanation: 'Endometrial atrophy is the most common cause of postmenopausal bleeding, accounting for 60-80% of cases.',
-          topic: 'Gynecology',
-          createdAt: '2024-01-14',
-          isActive: true
-        },
-        {
-          id: '3',
-          question: 'A 25-year-old woman with PCOS presents for fertility treatment. What is the first-line pharmacological treatment?',
-          options: [
-            'Gonadotropins',
-            'Clomiphene citrate',
-            'Metformin',
-            'Letrozole'
-          ],
-          correctAnswer: 'B',
-          explanation: 'Clomiphene citrate is the first-line treatment for ovulation induction in women with PCOS.',
-          topic: 'Reproductive Medicine',
-          createdAt: '2024-01-13',
-          isActive: true
-        }
-      ];
+      // Use the authenticated API service
+      const response = await questionsAPI.getAllQuestions();
       
-      setTimeout(() => {
-        setQuestions(mockQuestions);
-        setLoading(false);
-      }, 1000);
-    } catch (error) {
+      if (response.data?.questions && Array.isArray(response.data.questions)) {
+        // Transform the API data to match our interface
+        const transformedQuestions: Question[] = response.data.questions.map((q: any) => ({
+          id: q._id,
+          question: q.question,
+          options: q.options,
+          correctAnswer: q.correctAnswer,
+          explanation: q.explanation,
+          topic: q.topic,
+          createdAt: new Date(q.createdAt).toLocaleDateString('en-GB'),
+          isActive: q.isActive
+        }));
+        
+        setQuestions(transformedQuestions);
+        console.log(`Loaded ${transformedQuestions.length} questions from API`);
+      } else {
+        console.error('Invalid API response structure:', response.data);
+        setQuestions([]);
+      }
+    } catch (error: any) {
       console.error('Error fetching questions:', error);
+      if (error.response?.status === 401) {
+        console.error('Authentication failed - token may be expired');
+        // Redirect to login if unauthorized
+        window.location.href = '/login';
+        return;
+      }
+      setQuestions([]);
+    } finally {
       setLoading(false);
     }
   };
@@ -116,6 +93,11 @@ const ManageQuestions = () => {
     const matchesTopic = selectedTopic === '' || selectedTopic === 'All Topics' || question.topic === selectedTopic;
     return matchesSearch && matchesTopic;
   });
+
+  // Refresh questions from API
+  const refreshQuestions = () => {
+    fetchQuestions();
+  };
 
 
 
@@ -150,10 +132,21 @@ const ManageQuestions = () => {
             View, edit, and manage all MRCOG-1 questions
           </p>
         </div>
-        <button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Question
-        </button>
+        <div className="flex space-x-3">
+          <button 
+            onClick={refreshQuestions}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          >
+            <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
+          <button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Question
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -211,9 +204,14 @@ const ManageQuestions = () => {
       {/* Questions Table */}
       <div className="bg-white shadow rounded-lg overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-medium text-gray-900">
-            Questions ({filteredQuestions.length})
-          </h3>
+          <div className="flex justify-between items-center">
+            <h3 className="text-lg font-medium text-gray-900">
+              Questions ({filteredQuestions.length} of {questions.length} total)
+            </h3>
+            <span className="text-sm text-gray-500">
+              Showing {filteredQuestions.length} questions
+            </span>
+          </div>
         </div>
         
         <div className="overflow-x-auto">

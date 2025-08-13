@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Configure axios base URL - update this with your backend URL
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3010/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -44,8 +44,35 @@ export const dashboardAPI = {
 
 // Questions API
 export const questionsAPI = {
-  getAll: (params?: { topic?: string; search?: string }) => 
-    api.get('/questions', { params }),
+  getAll: (params?: { 
+    topic?: string; 
+    search?: string;
+    page?: number;
+    limit?: number;
+    getAll?: boolean; // Set to true to get all questions without pagination
+  }) => {
+    // If getAll is true, set a very high limit to get all questions
+    if (params?.getAll) {
+      return api.get('/questions', { 
+        params: { 
+          ...params, 
+          limit: 1000, // High limit to get all questions
+          page: 1 
+        } 
+      });
+    }
+    return api.get('/questions', { params });
+  },
+  
+  // Get all questions without pagination (for Question Scheduler)
+  getAllQuestions: (params?: { topic?: string; search?: string }) => 
+    api.get('/questions', { 
+      params: { 
+        ...params, 
+        limit: 1000, // High limit to get all questions
+        page: 1 
+      } 
+    }),
   
   getById: (id: string) => 
     api.get(`/questions/${id}`),
@@ -91,9 +118,27 @@ export const botAPI = {
 
 // Scheduling API
 export const schedulingAPI = {
-  // Get all question buckets
-  getBuckets: () => 
-    api.get('/scheduling/buckets'),
+  // Get all question buckets with filtering and pagination
+  getBuckets: (params?: {
+    topic?: string;
+    dayOfWeek?: string;
+    isActive?: boolean;
+    page?: number;
+    limit?: number;
+  }) => api.get('/scheduling/buckets', { params }),
+  
+  // Get all buckets without pagination (for Question Scheduler)
+  getAllBuckets: (params?: {
+    topic?: string;
+    dayOfWeek?: string;
+    isActive?: boolean;
+  }) => api.get('/scheduling/buckets', { 
+    params: { 
+      ...params, 
+      limit: 1000, // High limit to get all buckets
+      page: 1 
+    } 
+  }),
   
   // Get bucket by ID
   getBucket: (id: string) => 
@@ -115,6 +160,7 @@ export const schedulingAPI = {
     questions?: string[];
     maxQuestions?: number;
     dayOfWeek?: string;
+    isActive?: boolean;
   }) => api.put(`/scheduling/buckets/${id}`, data),
   
   // Delete bucket
@@ -126,16 +172,16 @@ export const schedulingAPI = {
     api.patch(`/scheduling/buckets/${id}/toggle`, { isActive }),
   
   // Get schedule for specific day
-  getDaySchedule: (dayOfWeek: string) => 
-    api.get(`/scheduling/days/${dayOfWeek}`),
+  getDaySchedule: (dayOfWeek: string, activeOnly: boolean = true) => 
+    api.get(`/scheduling/days/${dayOfWeek}`, { params: { activeOnly } }),
   
   // Get weekly schedule overview
-  getWeeklySchedule: () => 
-    api.get('/scheduling/weekly'),
+  getWeeklySchedule: (activeOnly: boolean = true) => 
+    api.get('/scheduling/weekly', { params: { activeOnly } }),
   
   // Get topic-wise schedule summary
-  getTopicSchedule: (topic: string) => 
-    api.get(`/scheduling/topics/${topic}`),
+  getTopicSchedule: (topic: string, activeOnly: boolean = true) => 
+    api.get(`/scheduling/topics/${topic}`, { params: { activeOnly } }),
   
   // Bulk update schedules
   updateSchedules: (schedules: Array<{
@@ -143,6 +189,22 @@ export const schedulingAPI = {
     dayOfWeek: string;
     isActive: boolean;
   }>) => api.put('/scheduling/bulk-update', { schedules }),
+  
+  // Add question to bucket
+  addQuestionToBucket: (bucketId: string, questionId: string) => 
+    api.post(`/scheduling/buckets/${bucketId}/questions/${questionId}`),
+  
+  // Remove question from bucket
+  removeQuestionFromBucket: (bucketId: string, questionId: string) => 
+    api.delete(`/scheduling/buckets/${bucketId}/questions/${questionId}`),
+  
+  // Get schedulable questions for a topic
+  getSchedulableQuestions: (topic: string, params?: {
+    page?: number;
+    limit?: number;
+    difficulty?: 'Easy' | 'Medium' | 'Hard';
+    search?: string;
+  }) => api.get(`/scheduling/questions/schedulable/${topic}`, { params }),
 };
 
 // Auth API (for future use)

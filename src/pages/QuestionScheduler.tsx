@@ -11,25 +11,38 @@ import {
   AlertCircle,
   CheckCircle,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from 'lucide-react';
+import { schedulingAPI, questionsAPI } from '../services/api';
 
 interface Question {
-  id: string;
+  _id: string;
   question: string;
   topic: string;
+  difficulty: 'Easy' | 'Medium' | 'Hard';
   isActive: boolean;
+  options: string[];
+  correctAnswer: string;
+  explanation: string;
 }
 
 interface QuestionBucket {
-  id: string;
+  _id: string;
   name: string;
   topic: string;
   questions: Question[];
   maxQuestions: number;
   dayOfWeek: string;
   isActive: boolean;
+  createdBy: string;
+  lastScheduled?: Date;
+  scheduleCount: number;
   createdAt: Date;
+  updatedAt: Date;
+  questionCount: number;
+  availableSlots: number;
+  completionPercentage: number;
 }
 
 const DAYS_OF_WEEK = [
@@ -51,6 +64,15 @@ const QuestionScheduler: React.FC = () => {
   const [expandedBuckets, setExpandedBuckets] = useState<Set<string>>(new Set());
   const [selectedTopic, setSelectedTopic] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Loading states
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingBuckets, setIsLoadingBuckets] = useState(false);
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Error states
+  const [error, setError] = useState<string | null>(null);
 
   const [newBucket, setNewBucket] = useState({
     name: '',
@@ -60,105 +82,223 @@ const QuestionScheduler: React.FC = () => {
     selectedQuestions: [] as string[]
   });
 
-  // Mock data for demonstration
+  // Load initial data
   useEffect(() => {
-    const mockQuestions: Question[] = [
-      { id: '1', question: 'What is the most common cause of postpartum hemorrhage?', topic: 'Obstetrics', isActive: true },
-      { id: '2', question: 'Which hormone is responsible for maintaining pregnancy?', topic: 'Obstetrics', isActive: true },
-      { id: '3', question: 'What is the first sign of preeclampsia?', topic: 'Obstetrics', isActive: true },
-      { id: '4', question: 'Which screening test is recommended for cervical cancer?', topic: 'Gynecology', isActive: true },
-      { id: '5', question: 'What is the most common type of ovarian cancer?', topic: 'Gynecological Oncology', isActive: true },
-    ];
-
-    const mockBuckets: QuestionBucket[] = [
-      {
-        id: '1',
-        name: 'Monday Obstetrics',
-        topic: 'Obstetrics',
-        questions: mockQuestions.filter(q => q.topic === 'Obstetrics').slice(0, 3),
-        maxQuestions: 5,
-        dayOfWeek: 'Monday',
-        isActive: true,
-        createdAt: new Date('2024-01-01')
-      }
-    ];
-
-    setQuestions(mockQuestions);
-    setBuckets(mockBuckets);
+    loadInitialData();
   }, []);
 
-  const handleCreateBucket = () => {
+  const loadInitialData = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // Load buckets and questions in parallel
+      const [bucketsResponse, questionsResponse] = await Promise.all([
+        schedulingAPI.getAllBuckets(), // Use getAllBuckets to get all buckets without pagination
+        questionsAPI.getAllQuestions() // Use getAllQuestions to get all questions without pagination
+      ]);
+      
+      // Debug API responses
+      console.log('Buckets API Response:', bucketsResponse);
+      console.log('Questions API Response:', questionsResponse);
+      
+      // Ensure we always set arrays
+      const bucketsData = bucketsResponse.data?.data?.docs; // Use .docs for the correct structure
+      const questionsData = questionsResponse.data?.questions; // Use .questions for the correct structure
+      
+      console.log('Buckets Response:', bucketsResponse.data);
+      console.log('Buckets Data:', bucketsData);
+      console.log('Questions Data:', questionsData);
+      
+      setBuckets(Array.isArray(bucketsData) ? bucketsData : []);
+      setQuestions(Array.isArray(questionsData) ? questionsData : []);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to load data');
+      console.error('Error loading initial data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadBuckets = async () => {
+    try {
+      setIsLoadingBuckets(true);
+      setError(null);
+      
+      const response = await schedulingAPI.getAllBuckets({
+        topic: selectedTopic || undefined,
+        isActive: true
+      });
+      
+      // Ensure we always set an array
+      const bucketsData = response.data?.data?.docs; // Use .docs for the correct structure
+      setBuckets(Array.isArray(bucketsData) ? bucketsData : []);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to load buckets');
+      console.error('Error loading buckets:', err);
+      setBuckets([]); // Set empty array on error
+    } finally {
+      setIsLoadingBuckets(false);
+    }
+  };
+
+  const loadQuestions = async () => {
+    try {
+      setIsLoadingQuestions(true);
+      setError(null);
+      
+      const response = await questionsAPI.getAllQuestions({
+        topic: selectedTopic || undefined,
+        search: searchQuery || undefined
+      });
+      
+      // Ensure we always set an array
+      const questionsData = response.data?.questions; // Use .questions instead of .data.questions
+      setQuestions(Array.isArray(questionsData) ? questionsData : []);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to load questions');
+      console.error('Error loading questions:', err);
+      setQuestions([]); // Set empty array on error
+    } finally {
+      setIsLoadingQuestions(false);
+    }
+  };
+
+  // Reload data when filters change
+  useEffect(() => {
+    if (!isLoading) {
+      loadBuckets();
+    }
+  }, [selectedTopic]);
+
+  useEffect(() => {
+    if (!isLoading) {
+      loadQuestions();
+    }
+  }, [selectedTopic, searchQuery]);
+
+  const handleCreateBucket = async () => {
     if (!newBucket.name || !newBucket.topic || newBucket.selectedQuestions.length === 0) {
       return;
     }
 
-    const bucket: QuestionBucket = {
-      id: Date.now().toString(),
-      name: newBucket.name,
-      topic: newBucket.topic,
-      questions: questions.filter(q => newBucket.selectedQuestions.includes(q.id)),
-      maxQuestions: newBucket.maxQuestions,
-      dayOfWeek: newBucket.dayOfWeek,
-      isActive: true,
-      createdAt: new Date()
-    };
-
-    setBuckets([...buckets, bucket]);
-    setNewBucket({
-      name: '',
-      topic: '',
-      maxQuestions: 5,
-      dayOfWeek: 'Monday',
-      selectedQuestions: []
-    });
-    setIsCreatingBucket(false);
+    try {
+      setIsSubmitting(true);
+      setError(null);
+      
+      const response = await schedulingAPI.createBucket({
+        name: newBucket.name,
+        topic: newBucket.topic,
+        questions: newBucket.selectedQuestions,
+        maxQuestions: newBucket.maxQuestions,
+        dayOfWeek: newBucket.dayOfWeek
+      });
+      
+      // Add new bucket to state
+      setBuckets([...buckets, response.data.data]);
+      
+      // Reset form
+      setNewBucket({
+        name: '',
+        topic: '',
+        maxQuestions: 5,
+        dayOfWeek: 'Monday',
+        selectedQuestions: []
+      });
+      setIsCreatingBucket(false);
+      
+      // Reload buckets to get updated data
+      await loadBuckets();
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to create bucket');
+      console.error('Error creating bucket:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleEditBucket = (bucketId: string) => {
-    const bucket = buckets.find(b => b.id === bucketId);
+    const bucket = buckets.find(b => b._id === bucketId);
     if (bucket) {
       setNewBucket({
         name: bucket.name,
         topic: bucket.topic,
         maxQuestions: bucket.maxQuestions,
         dayOfWeek: bucket.dayOfWeek,
-        selectedQuestions: bucket.questions.map(q => q.id)
+        selectedQuestions: bucket.questions.map(q => q._id)
       });
       setEditingBucket(bucketId);
       setIsCreatingBucket(true);
     }
   };
 
-  const handleUpdateBucket = () => {
+  const handleUpdateBucket = async () => {
     if (!editingBucket) return;
 
-    setBuckets(buckets.map(bucket => {
-      if (bucket.id === editingBucket) {
-        return {
-          ...bucket,
-          name: newBucket.name,
-          topic: newBucket.topic,
-          questions: questions.filter(q => newBucket.selectedQuestions.includes(q.id)),
-          maxQuestions: newBucket.maxQuestions,
-          dayOfWeek: newBucket.dayOfWeek
-        };
-      }
-      return bucket;
-    }));
-
-    setNewBucket({
-      name: '',
-      topic: '',
-      maxQuestions: 5,
-      dayOfWeek: 'Monday',
-      selectedQuestions: []
-    });
-    setEditingBucket(null);
-    setIsCreatingBucket(false);
+    try {
+      setIsSubmitting(true);
+      setError(null);
+      
+      await schedulingAPI.updateBucket(editingBucket, {
+        name: newBucket.name,
+        topic: newBucket.topic,
+        questions: newBucket.selectedQuestions,
+        maxQuestions: newBucket.maxQuestions,
+        dayOfWeek: newBucket.dayOfWeek
+      });
+      
+      // Reload buckets to get updated data
+      await loadBuckets();
+      
+      // Reset form
+      setNewBucket({
+        name: '',
+        topic: '',
+        maxQuestions: 5,
+        dayOfWeek: 'Monday',
+        selectedQuestions: []
+      });
+      setEditingBucket(null);
+      setIsCreatingBucket(false);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to update bucket');
+      console.error('Error updating bucket:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDeleteBucket = (bucketId: string) => {
-    setBuckets(buckets.filter(b => b.id !== bucketId));
+  const handleDeleteBucket = async (bucketId: string) => {
+    if (!confirm('Are you sure you want to delete this bucket?')) return;
+    
+    try {
+      setError(null);
+      await schedulingAPI.deleteBucket(bucketId);
+      
+      // Remove bucket from state
+      setBuckets(buckets.filter(b => b._id !== bucketId));
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to delete bucket');
+      console.error('Error deleting bucket:', err);
+    }
+  };
+
+  const toggleBucketActive = async (bucketId: string) => {
+    try {
+      setError(null);
+      const bucket = buckets.find(b => b._id === bucketId);
+      if (!bucket) return;
+      
+      await schedulingAPI.toggleBucketActive(bucketId, !bucket.isActive);
+      
+      // Update bucket in state
+      setBuckets(buckets.map(b => 
+        b._id === bucketId ? { ...b, isActive: !b.isActive } : b
+      ));
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to toggle bucket status');
+      console.error('Error toggling bucket status:', err);
+    }
   };
 
   const toggleBucketExpansion = (bucketId: string) => {
@@ -171,25 +311,42 @@ const QuestionScheduler: React.FC = () => {
     setExpandedBuckets(newExpanded);
   };
 
-  const toggleBucketActive = (bucketId: string) => {
-    setBuckets(buckets.map(bucket => 
-      bucket.id === bucketId ? { ...bucket, isActive: !bucket.isActive } : bucket
-    ));
-  };
+  // Ensure buckets and questions are arrays
+  const safeBuckets = Array.isArray(buckets) ? buckets : [];
+  const safeQuestions = Array.isArray(questions) ? questions : [];
 
-  const filteredQuestions = questions.filter(q => 
+  // Questions filtered for the main page (by search and topic filter)
+  const filteredQuestions = safeQuestions.filter(q => 
     q.isActive && 
     (selectedTopic === '' || q.topic === selectedTopic) &&
     (searchQuery === '' || q.question.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
+  // Questions filtered for the create bucket modal (by selected topic only)
+  const modalFilteredQuestions = safeQuestions.filter(q => 
+    q.isActive && 
+    (newBucket.topic === '' || q.topic === newBucket.topic)
+  );
+
   const getDayBuckets = (day: string) => {
-    return buckets.filter(b => b.dayOfWeek === day);
+    return safeBuckets.filter(b => b.dayOfWeek === day);
   };
 
   const getTopicBuckets = (topic: string) => {
-    return buckets.filter(b => b.topic === topic);
+    return safeBuckets.filter(b => b.topic === topic);
   };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Loading question scheduler...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -209,6 +366,22 @@ const QuestionScheduler: React.FC = () => {
           Create Bucket
         </button>
       </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-center">
+            <AlertCircle className="h-5 w-5 text-red-400 mr-2" />
+            <p className="text-red-800">{error}</p>
+            <button
+              onClick={() => setError(null)}
+              className="ml-auto text-red-400 hover:text-red-600"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Create/Edit Bucket Modal */}
       {isCreatingBucket && (
@@ -237,6 +410,16 @@ const QuestionScheduler: React.FC = () => {
             </div>
 
             <div className="space-y-4">
+              {/* Help text */}
+              {newBucket.topic && (
+                <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                  <p className="text-sm text-blue-800">
+                    <strong>Tip:</strong> You've selected <strong>{newBucket.topic}</strong>. 
+                    Only questions from this topic will be shown below.
+                  </p>
+                </div>
+              )}
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Bucket Name
@@ -257,7 +440,15 @@ const QuestionScheduler: React.FC = () => {
                   </label>
                   <select
                     value={newBucket.topic}
-                    onChange={(e) => setNewBucket({ ...newBucket, topic: e.target.value })}
+                    onChange={(e) => {
+                      const newTopic = e.target.value;
+                      // Clear selected questions when topic changes
+                      setNewBucket({ 
+                        ...newBucket, 
+                        topic: newTopic,
+                        selectedQuestions: [] // Reset selected questions when topic changes
+                      });
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select Topic</option>
@@ -300,32 +491,64 @@ const QuestionScheduler: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Select Questions ({newBucket.selectedQuestions.length}/{newBucket.maxQuestions})
+                  {newBucket.topic && (
+                    <span className="ml-2 text-sm font-normal text-gray-500">
+                      • {modalFilteredQuestions.length} questions available for {newBucket.topic}
+                    </span>
+                  )}
                 </label>
                 <div className="border border-gray-300 rounded-md p-3 max-h-48 overflow-y-auto">
-                  {filteredQuestions.map(question => (
-                    <label key={question.id} className="flex items-center space-x-2 py-1">
-                      <input
-                        type="checkbox"
-                        checked={newBucket.selectedQuestions.includes(question.id)}
-                        onChange={(e) => {
-                          if (e.target.checked && newBucket.selectedQuestions.length < newBucket.maxQuestions) {
-                            setNewBucket({
-                              ...newBucket,
-                              selectedQuestions: [...newBucket.selectedQuestions, question.id]
-                            });
-                          } else if (!e.target.checked) {
-                            setNewBucket({
-                              ...newBucket,
-                              selectedQuestions: newBucket.selectedQuestions.filter(id => id !== question.id)
-                            });
-                          }
-                        }}
-                        disabled={!newBucket.selectedQuestions.includes(question.id) && newBucket.selectedQuestions.length >= newBucket.maxQuestions}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm text-gray-700">{question.question}</span>
-                    </label>
-                  ))}
+                  {isLoadingQuestions ? (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                      <span className="ml-2 text-gray-600">Loading questions...</span>
+                    </div>
+                  ) : !newBucket.topic ? (
+                    <div className="text-center py-4 text-gray-500">
+                      <p>Please select a topic first to see available questions</p>
+                    </div>
+                  ) : modalFilteredQuestions.length === 0 ? (
+                    <div className="text-center py-4 text-gray-500">
+                      <p>No questions available for {newBucket.topic}</p>
+                    </div>
+                  ) : (
+                    modalFilteredQuestions.map(question => (
+                      <label key={question._id} className="flex items-center space-x-2 py-1">
+                        <input
+                          type="checkbox"
+                          checked={newBucket.selectedQuestions.includes(question._id)}
+                          onChange={(e) => {
+                            if (e.target.checked && newBucket.selectedQuestions.length < newBucket.maxQuestions) {
+                              setNewBucket({
+                                ...newBucket,
+                                selectedQuestions: [...newBucket.selectedQuestions, question._id]
+                              });
+                            } else if (!e.target.checked) {
+                              setNewBucket({
+                                ...newBucket,
+                                selectedQuestions: newBucket.selectedQuestions.filter(id => id !== question._id)
+                              });
+                            }
+                          }}
+                          disabled={!newBucket.selectedQuestions.includes(question._id) && newBucket.selectedQuestions.length >= newBucket.maxQuestions}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <span className="text-sm text-gray-700">{question.question}</span>
+                          <div className="flex items-center space-x-2 mt-1">
+                            <span className={`text-xs px-2 py-1 rounded-full ${
+                              question.difficulty === 'Easy' ? 'bg-green-100 text-green-700' :
+                              question.difficulty === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {question.difficulty}
+                            </span>
+                            <span className="text-xs text-gray-500">{question.topic}</span>
+                          </div>
+                        </div>
+                      </label>
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -348,10 +571,14 @@ const QuestionScheduler: React.FC = () => {
                 </button>
                 <button
                   onClick={editingBucket ? handleUpdateBucket : handleCreateBucket}
-                  disabled={!newBucket.name || !newBucket.topic || newBucket.selectedQuestions.length === 0}
+                  disabled={!newBucket.name || !newBucket.topic || newBucket.selectedQuestions.length === 0 || isSubmitting}
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  <Save className="h-4 w-4 mr-2 inline" />
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2 inline" />
+                  )}
                   {editingBucket ? 'Update' : 'Create'}
                 </button>
               </div>
@@ -393,7 +620,7 @@ const QuestionScheduler: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {TOPICS.map(topic => {
           const topicBuckets = getTopicBuckets(topic);
-          const totalQuestions = topicBuckets.reduce((sum, bucket) => sum + bucket.questions.length, 0);
+          const totalQuestions = topicBuckets.reduce((sum, bucket) => sum + (bucket.questionCount || bucket.questions.length), 0);
           const activeBuckets = topicBuckets.filter(b => b.isActive).length;
           const scheduledDays = [...new Set(topicBuckets.map(b => b.dayOfWeek))];
           
@@ -463,14 +690,14 @@ const QuestionScheduler: React.FC = () => {
                 ) : (
                   <div className="space-y-3">
                     {dayBuckets.map(bucket => (
-                      <div key={bucket.id} className="border border-gray-200 rounded-lg p-4">
+                      <div key={bucket._id} className="border border-gray-200 rounded-lg p-4">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3">
                             <button
-                              onClick={() => toggleBucketExpansion(bucket.id)}
+                              onClick={() => toggleBucketExpansion(bucket._id)}
                               className="text-gray-400 hover:text-gray-600"
                             >
-                              {expandedBuckets.has(bucket.id) ? (
+                              {expandedBuckets.has(bucket._id) ? (
                                 <ChevronDown className="h-4 w-4" />
                               ) : (
                                 <ChevronRight className="h-4 w-4" />
@@ -485,7 +712,7 @@ const QuestionScheduler: React.FC = () => {
                                 </span>
                                 <span className="flex items-center">
                                   <Clock className="h-4 w-4 mr-1" />
-                                  {bucket.questions.length}/{bucket.maxQuestions} questions
+                                  {bucket.questionCount || bucket.questions.length}/{bucket.maxQuestions} questions
                                 </span>
                                 <span className={`flex items-center ${bucket.isActive ? 'text-green-600' : 'text-red-600'}`}>
                                   {bucket.isActive ? (
@@ -495,12 +722,23 @@ const QuestionScheduler: React.FC = () => {
                                   )}
                                   {bucket.isActive ? 'Active' : 'Inactive'}
                                 </span>
+                                {bucket.completionPercentage !== undefined && (
+                                  <span className="flex items-center">
+                                    <div className="w-16 bg-gray-200 rounded-full h-2 mr-2">
+                                      <div 
+                                        className="bg-blue-600 h-2 rounded-full" 
+                                        style={{ width: `${bucket.completionPercentage}%` }}
+                                      ></div>
+                                    </div>
+                                    {bucket.completionPercentage}%
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
                           <div className="flex items-center space-x-2">
                             <button
-                              onClick={() => toggleBucketActive(bucket.id)}
+                              onClick={() => toggleBucketActive(bucket._id)}
                               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
                                 bucket.isActive
                                   ? 'bg-green-100 text-green-700 hover:bg-green-200'
@@ -510,13 +748,13 @@ const QuestionScheduler: React.FC = () => {
                               {bucket.isActive ? 'Active' : 'Inactive'}
                             </button>
                             <button
-                              onClick={() => handleEditBucket(bucket.id)}
+                              onClick={() => handleEditBucket(bucket._id)}
                               className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
                             >
                               <Edit className="h-4 w-4" />
                             </button>
                             <button
-                              onClick={() => handleDeleteBucket(bucket.id)}
+                              onClick={() => handleDeleteBucket(bucket._id)}
                               className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -524,14 +762,25 @@ const QuestionScheduler: React.FC = () => {
                           </div>
                         </div>
                         
-                        {expandedBuckets.has(bucket.id) && (
+                        {expandedBuckets.has(bucket._id) && (
                           <div className="mt-4 pt-4 border-t border-gray-200">
                             <h6 className="font-medium text-gray-700 mb-2">Questions in this bucket:</h6>
                             <div className="space-y-2">
                               {bucket.questions.map(question => (
-                                <div key={question.id} className="flex items-start space-x-2 p-2 bg-gray-50 rounded">
+                                <div key={question._id} className="flex items-start space-x-2 p-2 bg-gray-50 rounded">
                                   <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
-                                  <span className="text-sm text-gray-700">{question.question}</span>
+                                  <div className="flex-1">
+                                    <span className="text-sm text-gray-700">{question.question}</span>
+                                    <div className="flex items-center space-x-2 mt-1">
+                                      <span className={`text-xs px-2 py-1 rounded-full ${
+                                        question.difficulty === 'Easy' ? 'bg-green-100 text-green-700' :
+                                        question.difficulty === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
+                                        'bg-red-100 text-red-700'
+                                      }`}>
+                                        {question.difficulty}
+                                      </span>
+                                    </div>
+                                  </div>
                                 </div>
                               ))}
                             </div>
