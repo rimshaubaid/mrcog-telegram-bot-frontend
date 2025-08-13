@@ -67,7 +67,6 @@ const QuestionScheduler: React.FC = () => {
   
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingBuckets, setIsLoadingBuckets] = useState(false);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -122,7 +121,6 @@ const QuestionScheduler: React.FC = () => {
 
   const loadBuckets = async () => {
     try {
-      setIsLoadingBuckets(true);
       setError(null);
       
       const response = await schedulingAPI.getAllBuckets({
@@ -137,8 +135,6 @@ const QuestionScheduler: React.FC = () => {
       setError(err.response?.data?.message || 'Failed to load buckets');
       console.error('Error loading buckets:', err);
       setBuckets([]); // Set empty array on error
-    } finally {
-      setIsLoadingBuckets(false);
     }
   };
 
@@ -314,13 +310,6 @@ const QuestionScheduler: React.FC = () => {
   // Ensure buckets and questions are arrays
   const safeBuckets = Array.isArray(buckets) ? buckets : [];
   const safeQuestions = Array.isArray(questions) ? questions : [];
-
-  // Questions filtered for the main page (by search and topic filter)
-  const filteredQuestions = safeQuestions.filter(q => 
-    q.isActive && 
-    (selectedTopic === '' || q.topic === selectedTopic) &&
-    (searchQuery === '' || q.question.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
 
   // Questions filtered for the create bucket modal (by selected topic only)
   const modalFilteredQuestions = safeQuestions.filter(q => 

@@ -5,7 +5,6 @@ import {
   PlusCircle, 
   ListTodo, 
   Bot,
-  Settings,
   Calendar,
   LogOut,
   User
