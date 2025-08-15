@@ -151,6 +151,7 @@ export const schedulingAPI = {
     questions: string[];
     maxQuestions: number;
     dayOfWeek: string;
+    targetGroupId: string; // Add Telegram group ID
   }) => api.post('/scheduling/buckets', data),
   
   // Update existing bucket
@@ -161,6 +162,7 @@ export const schedulingAPI = {
     maxQuestions?: number;
     dayOfWeek?: string;
     isActive?: boolean;
+    targetGroupId?: string; // Add Telegram group ID
   }) => api.put(`/scheduling/buckets/${id}`, data),
   
   // Delete bucket
@@ -205,6 +207,10 @@ export const schedulingAPI = {
     difficulty?: 'Easy' | 'Medium' | 'Hard';
     search?: string;
   }) => api.get(`/scheduling/questions/schedulable/${topic}`, { params }),
+  
+  // Manually trigger question sending for a bucket
+  sendBucketQuestions: (bucketId: string, targetGroupId: string) => 
+    api.post(`/scheduling/buckets/${bucketId}/send`, { targetGroupId }),
 };
 
 // Auth API (for future use)
@@ -217,6 +223,27 @@ export const authAPI = {
   
   getProfile: () => 
     api.get('/auth/profile'),
+};
+
+// Telegram Groups API
+export const telegramGroupsAPI = {
+  // Discover available Telegram groups
+  discoverGroups: () => 
+    api.post('/admin/telegram-groups/discover'),
+  
+  // Get all groups
+  getAllGroups: () => 
+    api.get('/admin/telegram-groups'),
+  
+  // Get group by ID
+  getGroup: (id: string) => 
+    api.get(`/admin/telegram-groups/${id}`),
+  
+  // Update group settings
+  updateGroup: (id: string, data: {
+    isActive?: boolean;
+    name?: string;
+  }) => api.put(`/admin/telegram-groups/${id}`, data),
 };
 
 export default api; 

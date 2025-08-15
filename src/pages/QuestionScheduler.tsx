@@ -12,9 +12,11 @@ import {
   CheckCircle,
   ChevronDown,
   ChevronRight,
-  Loader2
+  Loader2,
+  Send
 } from 'lucide-react';
 import { schedulingAPI, questionsAPI } from '../services/api';
+import { telegramGroupsAPI } from '../services/api'; // Added import for telegramGroupsAPI
 
 interface Question {
   _id: string;
@@ -43,6 +45,16 @@ interface QuestionBucket {
   questionCount: number;
   availableSlots: number;
   completionPercentage: number;
+  targetGroupId?: string; // Add Telegram group ID
+}
+
+interface TelegramGroup {
+  groupId: string;
+  name: string;
+  type: string;
+  username: string | null;
+  isActive: boolean;
+  discoveredAt: string;
 }
 
 const DAYS_OF_WEEK = [
@@ -69,33 +81,58 @@ const QuestionScheduler: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [sendingBuckets, setSendingBuckets] = useState<Set<string>>(new Set());
   
   // Error states
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [newBucket, setNewBucket] = useState({
     name: '',
     topic: '',
     maxQuestions: 5,
     dayOfWeek: 'Monday',
-    selectedQuestions: [] as string[]
+    selectedQuestions: [] as string[],
+    targetGroupId: '' // Add Telegram group ID
   });
+
+  // Add state for Telegram groups
+  const [telegramGroups, setTelegramGroups] = useState<TelegramGroup[]>([]);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(false);
 
   // Load initial data
   useEffect(() => {
     loadInitialData();
   }, []);
 
+  const loadTelegramGroups = async () => {
+    try {
+      setIsLoadingGroups(true);
+      const response = await telegramGroupsAPI.discoverGroups();
+      if (response.data.success) {
+        setTelegramGroups(response.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load Telegram groups:', err);
+      setError('Failed to load Telegram groups');
+    } finally {
+      setIsLoadingGroups(false);
+    }
+  };
+
   const loadInitialData = async () => {
     try {
       setIsLoading(true);
       setError(null);
       
-      // Load buckets and questions in parallel
+      // Load buckets, questions, and Telegram groups in parallel
       const [bucketsResponse, questionsResponse] = await Promise.all([
         schedulingAPI.getAllBuckets(), // Use getAllBuckets to get all buckets without pagination
         questionsAPI.getAllQuestions() // Use getAllQuestions to get all questions without pagination
       ]);
+      
+      // Load Telegram groups separately
+      await loadTelegramGroups();
       
       // Debug API responses
       console.log('Buckets API Response:', bucketsResponse);
@@ -174,7 +211,7 @@ const QuestionScheduler: React.FC = () => {
   }, [selectedTopic, searchQuery]);
 
   const handleCreateBucket = async () => {
-    if (!newBucket.name || !newBucket.topic || newBucket.selectedQuestions.length === 0) {
+    if (!newBucket.name || !newBucket.topic || newBucket.selectedQuestions.length === 0 || !newBucket.targetGroupId) {
       return;
     }
 
@@ -187,7 +224,8 @@ const QuestionScheduler: React.FC = () => {
         topic: newBucket.topic,
         questions: newBucket.selectedQuestions,
         maxQuestions: newBucket.maxQuestions,
-        dayOfWeek: newBucket.dayOfWeek
+        dayOfWeek: newBucket.dayOfWeek,
+        targetGroupId: newBucket.targetGroupId
       });
       
       // Add new bucket to state
@@ -199,7 +237,8 @@ const QuestionScheduler: React.FC = () => {
         topic: '',
         maxQuestions: 5,
         dayOfWeek: 'Monday',
-        selectedQuestions: []
+        selectedQuestions: [],
+        targetGroupId: ''
       });
       setIsCreatingBucket(false);
       
@@ -221,7 +260,8 @@ const QuestionScheduler: React.FC = () => {
         topic: bucket.topic,
         maxQuestions: bucket.maxQuestions,
         dayOfWeek: bucket.dayOfWeek,
-        selectedQuestions: bucket.questions.map(q => q._id)
+        selectedQuestions: bucket.questions.map(q => q._id),
+        targetGroupId: bucket.targetGroupId || ''
       });
       setEditingBucket(bucketId);
       setIsCreatingBucket(true);
@@ -240,7 +280,8 @@ const QuestionScheduler: React.FC = () => {
         topic: newBucket.topic,
         questions: newBucket.selectedQuestions,
         maxQuestions: newBucket.maxQuestions,
-        dayOfWeek: newBucket.dayOfWeek
+        dayOfWeek: newBucket.dayOfWeek,
+        targetGroupId: newBucket.targetGroupId
       });
       
       // Reload buckets to get updated data
@@ -252,7 +293,8 @@ const QuestionScheduler: React.FC = () => {
         topic: '',
         maxQuestions: 5,
         dayOfWeek: 'Monday',
-        selectedQuestions: []
+        selectedQuestions: [],
+        targetGroupId: ''
       });
       setEditingBucket(null);
       setIsCreatingBucket(false);
@@ -294,6 +336,43 @@ const QuestionScheduler: React.FC = () => {
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to toggle bucket status');
       console.error('Error toggling bucket status:', err);
+    }
+  };
+
+  const handleManualSend = async (bucketId: string) => {
+    try {
+      setError(null);
+      const bucket = buckets.find(b => b._id === bucketId);
+      if (!bucket) return;
+      
+      if (!bucket.targetGroupId) {
+        setError('This bucket has no Telegram group assigned. Please assign a group first.');
+        return;
+      }
+
+      // Add bucket to sending state
+      setSendingBuckets(prev => new Set(prev).add(bucketId));
+      
+      // Send questions to the bucket's assigned group
+      await schedulingAPI.sendBucketQuestions(bucketId, bucket.targetGroupId);
+      
+      // Show success message
+      setError(null);
+      setSuccessMessage(`Questions from "${bucket.name}" sent successfully to Telegram group!`);
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => setSuccessMessage(null), 5000);
+      
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to send questions manually');
+      console.error('Error sending questions manually:', err);
+    } finally {
+      // Remove bucket from sending state
+      setSendingBuckets(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(bucketId);
+        return newSet;
+      });
     }
   };
 
@@ -347,13 +426,23 @@ const QuestionScheduler: React.FC = () => {
             Manage question distribution by topic and schedule them for specific days
           </p>
         </div>
-        <button
-          onClick={() => setIsCreatingBucket(true)}
-          className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="h-5 w-5 mr-2" />
-          Create Bucket
-        </button>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={loadTelegramGroups}
+            disabled={isLoadingGroups}
+            className="inline-flex items-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+          >
+            <Loader2 className={`h-4 w-4 mr-2 ${isLoadingGroups ? 'animate-spin' : ''}`} />
+            Refresh Groups
+          </button>
+          <button
+            onClick={() => setIsCreatingBucket(true)}
+            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="h-5 w-5 mr-2" />
+            Create Bucket
+          </button>
+        </div>
       </div>
 
       {/* Error Display */}
@@ -365,6 +454,22 @@ const QuestionScheduler: React.FC = () => {
             <button
               onClick={() => setError(null)}
               className="ml-auto text-red-400 hover:text-red-600"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Success Display */}
+      {successMessage && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="flex items-center">
+            <CheckCircle className="h-5 w-5 text-green-400 mr-2" />
+            <p className="text-green-800">{successMessage}</p>
+            <button
+              onClick={() => setSuccessMessage(null)}
+              className="ml-auto text-green-400 hover:text-green-600"
             >
               <X className="h-4 w-4" />
             </button>
@@ -389,7 +494,8 @@ const QuestionScheduler: React.FC = () => {
                     topic: '',
                     maxQuestions: 5,
                     dayOfWeek: 'Monday',
-                    selectedQuestions: []
+                    selectedQuestions: [],
+                    targetGroupId: ''
                   });
                 }}
                 className="text-gray-400 hover:text-gray-600"
@@ -479,6 +585,50 @@ const QuestionScheduler: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Telegram Group
+                </label>
+                {isLoadingGroups ? (
+                  <div className="flex items-center justify-center py-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-600 mr-2" />
+                    <span className="text-sm text-gray-600">Loading groups...</span>
+                  </div>
+                ) : telegramGroups.length === 0 ? (
+                  <div className="text-center py-2 text-red-500 bg-red-50 border border-red-200 rounded-md p-3">
+                    <p className="text-sm font-medium">No Telegram groups available</p>
+                    <p className="text-xs text-red-600 mt-1">
+                      Please refresh groups or contact an administrator to add Telegram groups
+                    </p>
+                    <button
+                      onClick={loadTelegramGroups}
+                      disabled={isLoadingGroups}
+                      className="mt-2 px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50"
+                    >
+                      {isLoadingGroups ? 'Loading...' : 'Refresh Groups'}
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    value={newBucket.targetGroupId}
+                    onChange={(e) => setNewBucket({ ...newBucket, targetGroupId: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select Telegram Group</option>
+                    {telegramGroups.map(group => (
+                      <option key={group.groupId} value={group.groupId}>
+                        {group.name} {group.username && `(@${group.username})`}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {newBucket.targetGroupId && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Questions will be sent to the selected Telegram group
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Select Questions ({newBucket.selectedQuestions.length}/{newBucket.maxQuestions})
                   {newBucket.topic && (
                     <span className="ml-2 text-sm font-normal text-gray-500">
@@ -551,7 +701,8 @@ const QuestionScheduler: React.FC = () => {
                       topic: '',
                       maxQuestions: 5,
                       dayOfWeek: 'Monday',
-                      selectedQuestions: []
+                      selectedQuestions: [],
+                      targetGroupId: ''
                     });
                   }}
                   className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
@@ -560,7 +711,7 @@ const QuestionScheduler: React.FC = () => {
                 </button>
                 <button
                   onClick={editingBucket ? handleUpdateBucket : handleCreateBucket}
-                  disabled={!newBucket.name || !newBucket.topic || newBucket.selectedQuestions.length === 0 || isSubmitting}
+                  disabled={!newBucket.name || !newBucket.topic || newBucket.selectedQuestions.length === 0 || !newBucket.targetGroupId || isSubmitting}
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {isSubmitting ? (
@@ -650,6 +801,29 @@ const QuestionScheduler: React.FC = () => {
                   <p className="text-xs text-gray-400 text-center">No buckets created</p>
                 </div>
               )}
+              
+              {/* Quick Send All Button */}
+              {topicBuckets.length > 0 && topicBuckets.some(b => b.isActive && b.targetGroupId) && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <button
+                    onClick={async () => {
+                      const activeBuckets = topicBuckets.filter(b => b.isActive && b.targetGroupId);
+                      for (const bucket of activeBuckets) {
+                        await handleManualSend(bucket._id);
+                      }
+                    }}
+                    disabled={topicBuckets.some(b => sendingBuckets.has(b._id))}
+                    className="w-full px-3 py-2 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors flex items-center justify-center space-x-2"
+                  >
+                    {topicBuckets.some(b => sendingBuckets.has(b._id)) ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                    <span>Send All Active Buckets</span>
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -722,6 +896,20 @@ const QuestionScheduler: React.FC = () => {
                                     {bucket.completionPercentage}%
                                   </span>
                                 )}
+                                {bucket.targetGroupId ? (
+                                  <span className="flex items-center text-green-600">
+                                    <svg className="h-4 w-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                      <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+                                      <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+                                    </svg>
+                                    {telegramGroups.find(g => g.groupId === bucket.targetGroupId)?.name || 'Unknown Group'}
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center text-red-600">
+                                    <AlertCircle className="h-4 w-4 mr-1" />
+                                    No Group Assigned
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -735,6 +923,24 @@ const QuestionScheduler: React.FC = () => {
                               }`}
                             >
                               {bucket.isActive ? 'Active' : 'Inactive'}
+                            </button>
+                            {console.log('bucket.targetGroupId', bucket)}
+                            <button
+                              onClick={() => handleManualSend(bucket._id)}
+                              disabled={!bucket.targetGroupId || sendingBuckets.has(bucket._id)}
+                              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors flex items-center space-x-1 ${
+                                bucket.targetGroupId
+                                  ? 'bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50'
+                                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                              }`}
+                              title={bucket.targetGroupId ? 'Send questions now' : 'No Telegram group assigned'}
+                            >
+                              {sendingBuckets.has(bucket._id) ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Send className="h-3 w-3" />
+                              )}
+                              <span>Send Now</span>
                             </button>
                             <button
                               onClick={() => handleEditBucket(bucket._id)}
